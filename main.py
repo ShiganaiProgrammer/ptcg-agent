@@ -516,18 +516,15 @@ def agent(obs_dict) -> list[int]:
                             _ABILITY_USED_THIS_TURN = True
                             return [opt_idx]
 
-    # Rule: Energy priority (attach only if active Pokemon is the best target)
+    # Rule: Attach energy once per turn (priority by Pokemon priority order)
     if select.get("type") == 0:
         if me_raw is not None:
-            active = _get_active_poke(me_raw)
-            if active is not None:
-                pid = active.get("id")
-                if pid is not None and pid in ENERGY_CAPS:
-                    current_nrg = len(active.get("energies", []))
-                    if current_nrg < ENERGY_CAPS[pid]:
-                        for i, o in enumerate(opts):
-                            if o.get("type") == 14:
-                                return [i]
+            current = obs_dict.get("current")
+            energy_attached = current.get("energyAttached", False) if current else False
+            if not energy_attached:
+                for i, o in enumerate(opts):
+                    if o.get("type") == 14:
+                        return [i]
 
     # Rule: Play priority - Items > Lillie's Determination > other Supporters
     if select.get("type") == 0:

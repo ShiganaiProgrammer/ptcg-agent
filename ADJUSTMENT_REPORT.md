@@ -29,6 +29,10 @@
   2. リーリエの決心（Lillie's Determination）を次に使う
   3. その他のサポート（Supporter）を使う
   - サポートは1ターンに1枚のみ（`supporterPlayed` フラグで管理）
+- 毎ターン必ず1回エネルギーを付けるルールに変更
+  - `energyAttached` が False の場合、`type=14` があれば必ず選択
+  - どのポケモンに付けるかはバトル場のポケモンで決まる（type=14はバトル場に付与）
+  - 優先順位の高いポケモンをバトル場に維持するよう他ルールと連携
 - `cardType` 定数をカードデータベースの値に修正:
   - 0=Pokémon, 1=Item, 2=Tool, 3=Supporter, 4=Stadium, 5=Energy
 
