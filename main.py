@@ -9,9 +9,12 @@ MAX_BENCH = 5
 OBS_DIM = 61
 HIDDEN_DIM = 256
 
-CARD_TYPE_POKEMON = 1
-CARD_TYPE_TRAINER = 2
-CARD_TYPE_ENERGY = 3
+CARD_TYPE_POKEMON = 0
+CARD_TYPE_ITEM = 1
+CARD_TYPE_TOOL = 2
+CARD_TYPE_SUPPORTER = 3
+CARD_TYPE_STADIUM = 4
+CARD_TYPE_ENERGY = 5
 
 # ============================================================
 # Deck loading
@@ -144,7 +147,7 @@ def encode_observation(obs_dict) -> np.ndarray:
     features.append(min(len(hand), 10) / 10.0)
     if hand:
         pokemon_in_hand = sum(1 for c in hand if _wrap(c).get("cardType") == CARD_TYPE_POKEMON) / 10.0
-        trainer_in_hand = sum(1 for c in hand if _wrap(c).get("cardType") == CARD_TYPE_TRAINER) / 10.0
+        trainer_in_hand = sum(1 for c in hand if _wrap(c).get("cardType") not in (CARD_TYPE_POKEMON, CARD_TYPE_ENERGY)) / 10.0
         energy_in_hand = sum(1 for c in hand if _wrap(c).get("cardType") == CARD_TYPE_ENERGY) / 10.0
         features.extend([pokemon_in_hand, trainer_in_hand, energy_in_hand])
     else:
@@ -224,6 +227,7 @@ LUNATONE_ID = 675
 SOLROCK_ID = 676
 RIOLU_ID = 677
 MEGA_LUCARIO_ID = 678
+LILLIES_DETERMINATION_ID = 1227
 
 # Energy caps per Pokemon ID
 ENERGY_CAPS = {
@@ -524,6 +528,37 @@ def agent(obs_dict) -> list[int]:
                         for i, o in enumerate(opts):
                             if o.get("type") == 14:
                                 return [i]
+
+    # Rule: Play priority - Items > Lillie's Determination > other Supporters
+    if select.get("type") == 0:
+        if me_raw is not None:
+            current = obs_dict.get("current")
+            supporter_played = current.get("supporterPlayed", False) if current else False
+            hand = me_raw.get("hand") if isinstance(me_raw, dict) else []
+            if hand:
+                item_opts = []
+                lillie_opt = None
+                supporter_opts = []
+                for i, o in enumerate(opts):
+                    if isinstance(o, dict) and o.get("type") == 8 and o.get("area") == 2:
+                        idx = o.get("index")
+                        if 0 <= idx < len(hand):
+                            card = hand[idx]
+                            card_obj = card._obj if isinstance(card, _DictCompat) else card
+                            ctype = card_obj.get("cardType")
+                            cid = card_obj.get("id")
+                            if ctype in (CARD_TYPE_ITEM, CARD_TYPE_TOOL):
+                                item_opts.append(i)
+                            elif cid == LILLIES_DETERMINATION_ID and not supporter_played:
+                                lillie_opt = i
+                            elif ctype == CARD_TYPE_SUPPORTER and not supporter_played:
+                                supporter_opts.append(i)
+                if item_opts:
+                    return [item_opts[0]]
+                if lillie_opt is not None:
+                    return [lillie_opt]
+                if supporter_opts:
+                    return [supporter_opts[0]]
 
     valid = np.where(get_action_mask(obs_dict))[0]
     if len(valid) == 0:
