@@ -253,9 +253,28 @@ DECKOUT_THRESHOLD = 5
 
 # Ability tracking
 _ABILITY_USED_THIS_TURN = False
+_PLAYING_POKEMON = False
 
 # Fighting energy card ID (Basic Fighting Energy)
 FIGHTING_ENERGY_ID = 241  # Basic Fighting Energy
+
+# Attack damage lookup
+ATTACK_DAMAGE = {
+    976: 10,
+    977: 30,
+    978: 210,
+    979: 50,
+    980: 70,
+    981: 30,
+    982: 130,
+    983: 270,
+}
+
+# Evolution mappings: evolution_id -> pre_evolution_id
+EVOLUTION_MAP = {
+    HARIYAMA_ID: MAKUHITA_ID,
+    MEGA_LUCARIO_ID: RIOLU_ID,
+}
 
 
 def _get_my_raw_state(obs_dict):
@@ -414,21 +433,47 @@ def _get_policy():
     return _POLICY
 
 
-def _handle_ability_subselect(select, me_raw):
+def _handle_subselect(select, me_raw, opp_raw, is_playing_poke=False):
     opts = select.get("option", [])
     if not opts:
         return None
-
-    sel_type = select.get("type")
+    stype = select.get("type")
     context = select.get("context")
 
-    if sel_type == 1 and context == 8:
+    if stype == 1 and context == 3:
+        bench_opts = []
+        active_opts = []
+        opp_bench_opts = []
+        for i, o in enumerate(opts):
+            if isinstance(o, dict):
+                pid = o.get("playerIndex")
+                area = o.get("area")
+                if pid == 0 and area == 5:
+                    bench_opts.append((i, o))
+                elif pid == 0 and area == 4:
+                    active_opts.append((i, o))
+                elif pid == 1 and area == 5:
+                    opp_bench_opts.append((i, o))
+        if is_playing_poke and bench_opts:
+            return [bench_opts[0][0]]
+        if bench_opts:
+            return [bench_opts[0][0]]
+        if active_opts:
+            return [active_opts[0][0]]
+        if opp_bench_opts:
+            return [opp_bench_opts[0][0]]
+        return [0]
+
+    if stype == 1 and context == 8:
         for i, o in enumerate(opts):
             if isinstance(o, dict) and o.get("area") == 2:
                 return [i]
         return [0]
 
-    if sel_type == 1:
+    if stype == 1 and context == 7:
+        return [0]
+
+    if stype == 1:
         for i, o in enumerate(opts):
             if isinstance(o, dict):
                 return [i]
@@ -438,13 +483,14 @@ def _handle_ability_subselect(select, me_raw):
 
 
 def agent(obs_dict) -> list[int]:
-    global _ABILITY_USED_THIS_TURN
+    global _ABILITY_USED_THIS_TURN, _PLAYING_POKEMON
 
     obs_dict = _wrap(obs_dict)
 
     select = obs_dict.get("select")
     if select is None:
         _ABILITY_USED_THIS_TURN = False
+        _PLAYING_POKEMON = False
         return _load_deck()
 
     num_to_select = select.get("maxCount", 1)
@@ -456,11 +502,11 @@ def agent(obs_dict) -> list[int]:
     me_raw = _get_my_raw_state(obs_dict)
     opp_raw = _get_opp_raw_state(obs_dict)
 
-    # --- Ability sub-selection handling ---
-    if _ABILITY_USED_THIS_TURN and select.get("type") == 1:
-        sub_choice = _handle_ability_subselect(select, me_raw)
+    # --- Sub-selection handling ---
+    if select.get("type") == 1:
+        sub_choice = _handle_subselect(select, me_raw, opp_raw, _PLAYING_POKEMON)
         if sub_choice is not None:
-            _ABILITY_USED_THIS_TURN = False
+            _PLAYING_POKEMON = False
             return sub_choice
 
     # Reset at start of main action
@@ -556,6 +602,74 @@ def agent(obs_dict) -> list[int]:
                     return [lillie_opt]
                 if supporter_opts:
                     return [supporter_opts[0]]
+
+    # Rule: Play basic Pokemon to bench
+    if select.get("type") == 0:
+        if me_raw is not None:
+            hand = me_raw.get("hand") if isinstance(me_raw, dict) else []
+            bench = me_raw.get("bench") if isinstance(me_raw, dict) else []
+            bench_count = sum(1 for b in bench if b is not None)
+            if bench_count < MAX_BENCH and hand:
+                for i, o in enumerate(opts):
+                    if isinstance(o, dict) and o.get("type") == 8 and o.get("area") == 2:
+                        idx = o.get("index")
+                        if 0 <= idx < len(hand):
+                            card = hand[idx]
+                            card_obj = card._obj if isinstance(card, _DictCompat) else card
+                            cid = card_obj.get("id")
+                            if cid in (MAKUHITA_ID, LUNATONE_ID, SOLROCK_ID, RIOLU_ID):
+                                _PLAYING_POKEMON = True
+                                return [i]
+
+    # Rule: Evolve Pokemon
+    if select.get("type") == 0:
+        if me_raw is not None:
+            hand = me_raw.get("hand") if isinstance(me_raw, dict) else []
+            if hand:
+                for i, o in enumerate(opts):
+                    if isinstance(o, dict) and o.get("type") == 8 and o.get("area") == 2:
+                        idx = o.get("index")
+                        if 0 <= idx < len(hand):
+                            card = hand[idx]
+                            card_obj = card._obj if isinstance(card, _DictCompat) else card
+                            cid = card_obj.get("id")
+                            if cid in EVOLUTION_MAP:
+                                prevo = EVOLUTION_MAP[cid]
+                                prevo_zone, prevo_idx, _ = _get_field_pokemon_by_id(me_raw, prevo)
+                                if prevo_zone is not None:
+                                    return [i]
+
+    # Rule: Attack (highest damage)
+    if select.get("type") == 0:
+        best_dmg = -1
+        best_opt = None
+        for i, o in enumerate(opts):
+            if isinstance(o, dict) and o.get("type") == 13:
+                aid = o.get("attackId")
+                dmg = ATTACK_DAMAGE.get(aid, 0)
+                if dmg > best_dmg:
+                    best_dmg = dmg
+                    best_opt = i
+        if best_opt is not None:
+            return [best_opt]
+
+    # Rule: Retreat if active is weak or has no attack energy
+    if select.get("type") == 0:
+        if me_raw is not None:
+            active = _get_active_poke(me_raw)
+            if active is not None:
+                should_retreat = False
+                active_hp = active.get("hp", 0)
+                active_id = active.get("id")
+                active_nrg = len(active.get("energies", []))
+                if active_hp <= 50:
+                    should_retreat = True
+                if active_nrg == 0:
+                    should_retreat = True
+                if should_retreat:
+                    for i, o in enumerate(opts):
+                        if isinstance(o, dict) and o.get("type") == 7:
+                            return [i]
 
     valid = np.where(get_action_mask(obs_dict))[0]
     if len(valid) == 0:

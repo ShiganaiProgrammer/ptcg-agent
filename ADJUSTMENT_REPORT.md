@@ -33,8 +33,19 @@
   - `energyAttached` が False の場合、`type=14` があれば必ず選択
   - どのポケモンに付けるかはバトル場のポケモンで決まる（type=14はバトル場に付与）
   - 優先順位の高いポケモンをバトル場に維持するよう他ルールと連携
+- 基本ポケモンをベンチに出すルールを追加
+  - ベンチに空きがあり、手札に基本ポケモン（Makuhita, Lunatone, Solrock, Riolu）がある場合、type=8でプレイ
+  - プレイ後の sub-selection（context=3）でベンチ位置を選択
+- 進化のルールを追加
+  - 手札に進化カード（Hariyama→Makuhita, Mega Lucario ex→Riolu）があり、対応するポケモンが場にいる場合、type=8で進化
+- 攻撃のルールを追加
+  - type=13 のオプションから最もダメージの高い攻撃を選択
+  - 攻撃ダメージ: Mega Brave=270, Wild Press=210, Aura Jab=130, Cosmic Beam=70, Power Gem=50, Accelerating Stab/Confront=30, Corkscrew Punch=10
+- にげるのルールを追加
+  - バトル場のポケモンのHPが50以下、またはエネルギーが0の場合、type=7でにげる
 - `cardType` 定数をカードデータベースの値に修正:
   - 0=Pokémon, 1=Item, 2=Tool, 3=Supporter, 4=Stadium, 5=Energy
+- サブセレクション処理を汎用化: `_handle_subselect()` で context=3,7,8 を処理
 
 ### 注意点
 - `type=14`（エネルギー付ける）はバトル場のポケモンにしか付けられない。そのため、優先順位の高いポケモンがベンチにいる場合は直接エネルギーを付けられない
